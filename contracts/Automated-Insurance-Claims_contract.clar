@@ -110,3 +110,95 @@
     last-updated: uint
   }
 )
+
+;; Maps for policy conditions (claim triggers)
+(define-map policy-conditions
+  { policy-id: uint, condition-index: uint }
+  {
+    weather-type: uint,
+    operator: uint,
+    threshold-value: uint,
+    payout-percentage: uint, ;; percentage of coverage to pay out (basis points)
+    oracle-id: (string-ascii 36)
+  }
+)
+
+;; Maps for claims
+(define-map claims
+  { claim-id: uint }
+  {
+    policy-id: uint,
+    claimant: principal,
+    claim-status: uint,
+    claim-amount: uint,
+    weather-event-type: uint,
+    weather-event-value: uint,
+    condition-index: uint,
+    submitted-block: uint,
+    processed-block: (optional uint),
+    paid-block: (optional uint),
+    oracle-data-block: uint
+  }
+)
+
+;; Maps for claim history by policy
+(define-map policy-claims
+  { policy-id: uint, claim-index: uint }
+  { claim-id: uint }
+)
+
+;; Maps for policy count by user
+(define-map user-policy-count
+  { user: principal }
+  { count: uint }
+)
+
+;; Maps for policy indices by user
+(define-map user-policies
+  { user: principal, index: uint }
+  { policy-id: uint }
+)
+
+;; Initialize common risk profiles
+(begin
+  ;; Agricultural drought insurance
+  (map-set risk-profiles 
+    { profile-id: u1 } 
+    {
+      profile-name: "Agricultural Drought Insurance",
+      base-premium-rate: u500, ;; 5%
+      coverage-multiplier: u1000, ;; 10x
+      risk-factor: u300, ;; 3%
+      min-coverage: u10000000, ;; 100 STX
+      max-coverage: u1000000000, ;; 10,000 STX
+      description: "Insurance for farmers against drought conditions"
+    }
+  )
+  
+  ;; Flood insurance
+  (map-set risk-profiles 
+    { profile-id: u2 } 
+    {
+      profile-name: "Flood Insurance",
+      base-premium-rate: u750, ;; 7.5%
+      coverage-multiplier: u800, ;; 8x
+      risk-factor: u500, ;; 5%
+      min-coverage: u20000000, ;; 200 STX
+      max-coverage: u2000000000, ;; 20,000 STX
+      description: "Insurance against flood damage"
+    }
+  )
+  
+  ;; Hurricane insurance
+  (map-set risk-profiles 
+    { profile-id: u3 } 
+    {
+      profile-name: "Hurricane Insurance",
+      base-premium-rate: u1000, ;; 10%
+      coverage-multiplier: u600, ;; 6x
+      risk-factor: u800, ;; 8%
+      min-coverage: u50000000, ;; 500 STX
+      max-coverage: u5000000000, ;; 50,000 STX
+      description: "Insurance against hurricane damage"
+    }
+  )
