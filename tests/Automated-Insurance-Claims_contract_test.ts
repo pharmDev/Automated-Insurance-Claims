@@ -1,167 +1,124 @@
-;; Test script for NFT-Collateralized Lending Protocol
-;; Run with `clarity-cli test /path/to/test-script.clar`
-
-;; Import the main contract
-(contract-call? .nft-lending-protocol initialize 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
-
-;; Test utilities
-(define-constant test-address-1 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
-(define-constant test-address-2 'ST2CY5V39NHDPWSXMW9QDT3HC3GD6Q6XX4CFRK9AG)
-(define-constant test-address-3 'ST2JHG361ZXG51QTKY2NQCVBPPRRE2KZB1HR05NNC)
-(define-constant test-appraiser-1 'ST2REHHS5J3CERCRBEPMGH7921Q6PYKAADT7JP2VB)
-(define-constant test-appraiser-2 'ST3AM1A56AK2C1XAFJ4115ZSV26EB49BVQ10MGCS0)
-(define-constant test-appraiser-3 'ST3NBRSFKX28FQ2ZJ1MAKX58HKHSDGNV5N7R21XCP)
-
-(define-constant test-nft-contract 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.test-nft)
-
-;; Helper for testing expected results
-(define-private (test-result (actual (response bool uint)) (expected-error (optional uint)))
-  (if (is-some expected-error)
-    (and (is-err actual) (is-eq (unwrap-err actual) (unwrap-panic expected-error)))
-    (is-ok actual)
-  )
-)
-
-;; Test setup
-(print "Setting up test environment...")
-
-;; Test 1: Register a new collection
-(print "Test 1: Register a new collection")
-(let ((result (contract-call? .nft-lending-protocol register-collection 
-               "test-collection-1" 
-               test-nft-contract
-               "https://example.com/api/nft/"
-               u5000  ;; 50% max LTV
-               u500   ;; 5% min interest rate
-               u2000  ;; 20% max interest rate
-               "linear"
-               (list "Common" "Uncommon" "Rare" "Epic" "Legendary")
-               u1000000 ;; Min value 1M tokens
-               u100000000 ;; Max value 100M tokens
-               )))
-  (asserts! (is-ok result) (err "Failed to register collection"))
-  (print "✓ Collection registered successfully")
-)
-
-;; Test 2: Authorize appraisers
-(print "Test 2: Authorize appraisers")
-(let ((result-1 (contract-call? .nft-lending-protocol authorize-appraiser
-                test-appraiser-1
-                (list "test-collection-1")))
-      (result-2 (contract-call? .nft-lending-protocol authorize-appraiser
-                test-appraiser-2
-                (list "test-collection-1")))
-      (result-3 (contract-call? .nft-lending-protocol authorize-appraiser
-                test-appraiser-3
-                (list "test-collection-1"))))
-  (asserts! (and (is-ok result-1) (is-ok result-2) (is-ok result-3)) 
-            (err "Failed to authorize appraisers"))
-  (print "✓ Appraisers authorized successfully")
-)
-;; Test 3: Test appraisal workflow
-(print "Test 3: Testing appraisal workflow")
-
-;; 3.1 Request an appraisal
-(print "3.1: Request an appraisal")
-(let ((result (as-contract (contract-call? .nft-lending-protocol request-appraisal
-                          "test-collection-1"
-                          u1))))
-  (asserts! (is-ok result) (err "Failed to request appraisal"))
-  (let ((request-id (unwrap-panic result)))
-    (print (concat "✓ Appraisal requested with ID: " (to-string request-id)))
-    
-    ;; 3.2 Submit appraisals from all appraisers
-    (print "3.2: Submit appraisals")
-    (let ((result-1 (contract-call? .nft-lending-protocol submit-appraisal request-id u10000000 tx-sender test-appraiser-1))
-          (result-2 (contract-call? .nft-lending-protocol submit-appraisal request-id u11000000 tx-sender test-appraiser-2))
-          (result-3 (contract-call? .nft-lending-protocol submit-appraisal request-id u12000000 tx-sender test-appraiser-3)))
-      (asserts! (and (is-ok result-1) (is-ok result-2) (is-ok result-3)) 
-                (err "Failed to submit appraisals"))
-      (print "✓ Appraisals submitted successfully")
-      
-      ;; 3.3 Check if appraisal was finalized
-      (print "3.3: Verify appraisal finalization")
-      (let ((appraisal-request (contract-call? .nft-lending-protocol get-appraisal-request request-id)))
-        (asserts! (is-ok appraisal-request) (err "Failed to get appraisal request"))
-        (let ((request-data (unwrap-panic appraisal-request)))
-          (asserts! (is-eq (get status request-data) "completed") 
-                    (err "Appraisal was not finalized"))
-          (asserts! (is-some (get final-value request-data)) 
-                    (err "Appraisal has no final value"))
-          (print (concat "✓ Appraisal finalized with value: " 
-                 (to-string (unwrap-panic (get final-value request-data)))))
-        )
-      )
-    )
-  )
-)
-
-;; Test 4: Apply for a loan
-(print "Test 4: Apply for a loan")
-(let ((result (contract-call? .nft-lending-protocol apply-for-loan
-              "test-collection-1"
-              u1
-              u5000000  ;; 5M tokens (50% of appraised value)
-              u1440     ;; 10 day duration (144 blocks per day)
-              )))
-  (asserts! (is-ok result) (err "Failed to apply for loan"))
-  (let ((loan-id (unwrap-panic result)))
-    (print (concat "✓ Loan created with ID: " (to-string loan-id)))
-    
-    ;; 4.1 Check loan details
-    (print "4.1: Verify loan details")
-    (let ((loan-details (contract-call? .nft-lending-protocol get-loan loan-id)))
-      (asserts! (is-ok loan-details) (err "Failed to get loan details"))
-      (let ((loan-data (unwrap-panic loan-details)))
-        (asserts! (is-eq (get state loan-data) u0) (err "Loan state is not active"))
-        (asserts! (is-eq (get borrower loan-data) tx-sender) 
-                  (err "Loan borrower doesn't match"))
-        (print (concat "✓ Loan verified with amount: " 
-               (to-string (get loan-amount loan-data))
-               " and interest rate: "
-               (to-string (get interest-rate loan-data))))
-      )
-    )
-  )
-)
-;; Test 5: Partial loan repayment
-(print "Test 5: Partial loan repayment")
-(let ((loan-id u1)
-      (repay-amount u1000000)) ;; 1M tokens
-  (let ((result (contract-call? .nft-lending-protocol repay-loan loan-id repay-amount)))
-    (asserts! (is-ok result) (err "Failed to repay loan"))
-    (print "✓ Partial repayment successful")
-    
-    ;; 5.1 Check updated loan details
-    (print "5.1: Verify updated loan details")
-    (let ((loan-details (contract-call? .nft-lending-protocol get-loan loan-id)))
-      (asserts! (is-ok loan-details) (err "Failed to get loan details"))
-      (let ((loan-data (unwrap-panic loan-details)))
-        (asserts! (> (get repaid-amount loan-data) u0) 
-                  (err "Repaid amount was not updated"))
-        (print (concat "✓ Loan updated with repaid amount: " 
-               (to-string (get repaid-amount loan-data))))
-      )
-    )
-  )
-)
-
-;; Test 6: Full loan repayment
-(print "Test 6: Full loan repayment")
-(let ((loan-id u1))
-  (let ((loan-details (contract-call? .nft-lending-protocol get-loan loan-id)))
-    (asserts! (is-ok loan-details) (err "Failed to get loan details"))
-    (let ((loan-data (unwrap-panic loan-details))
-          (remaining (get remaining-amount loan-data)))
-      (let ((result (contract-call? .nft-lending-protocol repay-loan loan-id remaining)))
-        (asserts! (is-ok result) (err "Failed to repay loan fully"))
-        (print "✓ Full repayment successful")
-        
-        ;; 6.1 Check loan is marked as repaid
-        (print "6.1: Verify loan is marked as repaid")
-        (let ((updated-loan (contract-call? .nft-lending-protocol get-loan loan-id)))
-          (asserts! (is-ok updated-loan) (err "Failed to get updated loan details"))
-          (let ((updated-data (unwrap-panic updated-loan)))
-            (asserts! (is-eq (get state updated-data) u1) 
-                      (err "Loan state is not marked as repaid"))
-            (print "✓ Loan successfully marked as repaid")
+import {
+    Clarinet,
+    Tx,
+    Chain,
+    Account,
+    types,
+  } from "https://deno.land/x/clarinet@v1.6.2/index.ts";
+  import { assertEquals, assertNotEquals } from "https://deno.land/std@0.203.0/assert/mod.ts";
+  
+  Clarinet.test({
+    name: "register-oracle: should register a new oracle by contract owner",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+      const deployer = accounts.get("deployer")!;
+  
+      const block = chain.mineBlock([
+        Tx.contractCall(
+          "auto-insurance",
+          "register-oracle",
+          [
+            types.ascii("oracle-001"),
+            types.utf8("WeatherOracle"),
+            types.uint(1),
+          ],
+          deployer.address
+        ),
+      ]);
+  
+      block.receipts[0].result.expectOk().expectBool(true);
+  
+      const oracle = chain.callReadOnlyFn(
+        "auto-insurance",
+        "get-oracle",
+        [types.ascii("oracle-001")],
+        deployer.address
+      );
+  
+      oracle.result.expectSome().expectTuple();
+    },
+  });
+  
+  Clarinet.test({
+    name: "get-risk-profile: should retrieve correct risk profile for drought",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+      const deployer = accounts.get("deployer")!;
+      const result = chain.callReadOnlyFn(
+        "auto-insurance",
+        "get-risk-profile",
+        [types.uint(1)],
+        deployer.address
+      );
+  
+      result.result.expectSome().expectTuple();
+    },
+  });
+  
+  Clarinet.test({
+    name: "calculate-premium: should return correct premium for drought profile",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+      const deployer = accounts.get("deployer")!;
+      const result = chain.callReadOnlyFn(
+        "auto-insurance",
+        "calculate-premium",
+        [
+          types.uint(1), // drought profile
+          types.uint(100000000), // coverage: 1000 STX
+          types.utf8("Kaduna"),
+        ],
+        deployer.address
+      );
+  
+      // base-rate = 500 (5%), risk = 300 (3%) → total = 8%
+      // 8% of 100000000 = 8000000
+      result.result.expectOk().expectUint(8000000);
+    },
+  });
+  
+  Clarinet.test({
+    name: "submit-oracle-data: should allow oracle to submit weather data",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+      const deployer = accounts.get("deployer")!;
+  
+      chain.mineBlock([
+        Tx.contractCall(
+          "auto-insurance",
+          "register-oracle",
+          [types.ascii("oracle-001"), types.utf8("WeatherOracle"), types.uint(1)],
+          deployer.address
+        ),
+      ]);
+  
+      const block = chain.mineBlock([
+        Tx.contractCall(
+          "auto-insurance",
+          "submit-oracle-data",
+          [
+            types.ascii("oracle-001"),
+            types.uint(1), // weather type: rainfall
+            types.utf8("Kaduna"),
+            types.uint(100),
+            types.uint(111111111),
+          ],
+          deployer.address
+        ),
+      ]);
+  
+      block.receipts[0].result.expectOk().expectBool(true);
+    },
+  });
+  
+  Clarinet.test({
+    name: "some-condition-met: should return false if condition not met or missing",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+      const deployer = accounts.get("deployer")!;
+      const result = chain.callReadOnlyFn(
+        "auto-insurance",
+        "some-condition-met",
+        [types.uint(999)], // non-existent policy
+        deployer.address
+      );
+  
+      result.result.expectBool(false);
+    },
+  });
+  
