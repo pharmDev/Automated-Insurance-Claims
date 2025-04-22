@@ -124,3 +124,44 @@
     )
   )
 )
+;; Test 5: Partial loan repayment
+(print "Test 5: Partial loan repayment")
+(let ((loan-id u1)
+      (repay-amount u1000000)) ;; 1M tokens
+  (let ((result (contract-call? .nft-lending-protocol repay-loan loan-id repay-amount)))
+    (asserts! (is-ok result) (err "Failed to repay loan"))
+    (print "✓ Partial repayment successful")
+    
+    ;; 5.1 Check updated loan details
+    (print "5.1: Verify updated loan details")
+    (let ((loan-details (contract-call? .nft-lending-protocol get-loan loan-id)))
+      (asserts! (is-ok loan-details) (err "Failed to get loan details"))
+      (let ((loan-data (unwrap-panic loan-details)))
+        (asserts! (> (get repaid-amount loan-data) u0) 
+                  (err "Repaid amount was not updated"))
+        (print (concat "✓ Loan updated with repaid amount: " 
+               (to-string (get repaid-amount loan-data))))
+      )
+    )
+  )
+)
+
+;; Test 6: Full loan repayment
+(print "Test 6: Full loan repayment")
+(let ((loan-id u1))
+  (let ((loan-details (contract-call? .nft-lending-protocol get-loan loan-id)))
+    (asserts! (is-ok loan-details) (err "Failed to get loan details"))
+    (let ((loan-data (unwrap-panic loan-details))
+          (remaining (get remaining-amount loan-data)))
+      (let ((result (contract-call? .nft-lending-protocol repay-loan loan-id remaining)))
+        (asserts! (is-ok result) (err "Failed to repay loan fully"))
+        (print "✓ Full repayment successful")
+        
+        ;; 6.1 Check loan is marked as repaid
+        (print "6.1: Verify loan is marked as repaid")
+        (let ((updated-loan (contract-call? .nft-lending-protocol get-loan loan-id)))
+          (asserts! (is-ok updated-loan) (err "Failed to get updated loan details"))
+          (let ((updated-data (unwrap-panic updated-loan)))
+            (asserts! (is-eq (get state updated-data) u1) 
+                      (err "Loan state is not marked as repaid"))
+            (print "✓ Loan successfully marked as repaid")
